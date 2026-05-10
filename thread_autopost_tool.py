@@ -25,11 +25,9 @@ BASE_DIR = os.getcwd()
 CREDENTIAL_FILE = "credentials.json"
 RECRUIT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1YZrOO7Wb1fSCKeLNQnZMbXfNJuc7-kIz5ub1aXmzZdg/edit?usp=sharing"
 
-# ===== TÊN TAB =====
 RECRUIT_TAB_NAME = "Recruitment"
 ACCOUNT_TAB_NAME = "Accounts"
 
-# ===== TÊN CỘT TAB RECRUITMENT =====
 COL_POSITION = "Position"
 COL_JOB_CONTENT = "Job Content"
 COL_THREAD_CONTENT = "Thread Content"
@@ -114,15 +112,12 @@ def connect_sheet(tab_name):
     return client.open_by_url(RECRUIT_SHEET_URL).worksheet(tab_name)
 
 
-# 👇 ĐÃ VÁ LỖI DUPLICATE HEADER TRONG TAB ACCOUNTS 👇
 def get_all_accounts():
     sheet = connect_sheet(ACCOUNT_TAB_NAME)
     all_values = sheet.get_all_values()
     if len(all_values) < 2:
         return {}
-
     headers = all_values[0]
-    # Ép ghép tiêu đề thủ công để bỏ qua lỗi cột trống
     records = [dict(zip(headers, row)) for row in all_values[1:]]
 
     accounts = {}
@@ -136,15 +131,12 @@ def get_all_accounts():
     return accounts
 
 
-# 👇 ĐÃ VÁ LỖI DUPLICATE HEADER TRONG TAB RECRUITMENT 👇
 def get_unposted_rows(limit=MAX_POSTS_PER_RUN):
     sheet = connect_sheet(RECRUIT_TAB_NAME)
     all_values = sheet.get_all_values()
     if len(all_values) < 2:
         return []
-
     headers = all_values[0]
-    # Ép ghép tiêu đề thủ công để bỏ qua lỗi cột trống
     rows = [dict(zip(headers, row)) for row in all_values[1:]]
 
     results = []
@@ -199,6 +191,10 @@ class ThreadsBot:
             BASE_DIR, "cookies", f"{self.account_code}.json"
         )
         os.makedirs(os.path.dirname(self.cookie_file), exist_ok=True)
+
+        # 👇 Thư mục dành riêng chứa ảnh lỗi
+        self.error_dir = os.path.join(BASE_DIR, "error_logs")
+        os.makedirs(self.error_dir, exist_ok=True)
 
         self.pw = None
         self.browser = None
@@ -309,7 +305,11 @@ class ThreadsBot:
             print(f"💾 Đã lưu Cookie mới vào: {self.cookie_file}")
 
         except Exception as e:
-            await self.page.screenshot(path=f"error_login_{self.account_code}.png")
+            await self.page.screenshot(
+                path=os.path.join(
+                    self.error_dir, f"error_login_{self.account_code}.png"
+                )
+            )
             raise Exception(f"❌ Login tự động thất bại. Lỗi: {e}")
 
     async def _get_latest_post_url(self) -> str:
@@ -350,7 +350,12 @@ class ThreadsBot:
 
             await self.page.wait_for_timeout(3000)
 
-        await self.page.screenshot(path=f"error_missing_post_{self.account_code}.png")
+        # 👇 ĐÃ SỬA: Đẩy ảnh lỗi vào thư mục error_logs 👇
+        await self.page.screenshot(
+            path=os.path.join(
+                self.error_dir, f"error_missing_post_{self.account_code}.png"
+            )
+        )
         return ""
 
     async def post(self, text: str, image_path: str | None = None, topic: str = ""):
@@ -369,7 +374,6 @@ class ThreadsBot:
                 print(f"🏷️ Đang gắn Chủ đề (Topic): {clean_topic}...")
                 await self.page.keyboard.type(f"\n\n#{clean_topic}", delay=150)
                 await self.page.wait_for_timeout(2000)
-
                 await self.page.keyboard.press("Enter")
                 await self.page.wait_for_timeout(1000)
 
@@ -416,7 +420,11 @@ class ThreadsBot:
             print("✅ Đã đăng comment phụ thành công!")
             await self.page.wait_for_timeout(4000)
         except Exception as e:
-            await self.page.screenshot(path=f"error_reply_{self.account_code}.png")
+            await self.page.screenshot(
+                path=os.path.join(
+                    self.error_dir, f"error_reply_{self.account_code}.png"
+                )
+            )
             print(f"⚠ Không thể comment phụ. Lỗi: {e}")
 
     async def get_profile_name(self) -> str:
@@ -461,7 +469,9 @@ class ThreadsBot:
 
         except Exception as e:
             await self.page.screenshot(
-                path=f"error_open_composer_{self.account_code}.png"
+                path=os.path.join(
+                    self.error_dir, f"error_open_composer_{self.account_code}.png"
+                )
             )
             raise Exception(f"Không thể mở khung đăng bài: {e}")
 
@@ -539,7 +549,6 @@ async def run():
             print("⚠ Job Content (Bài chính) trống → SKIP")
             continue
 
-        # 👇 TRẠM KIỂM DUYỆT: Tự điền LỖI vào Google Sheet nếu lố 500 ký tự 👇
         job_content_normalized = normalize_threads_content(job_content)
         total_length = len(job_content_normalized)
 
@@ -577,7 +586,6 @@ async def run():
                 except Exception as e:
                     raise Exception(f"❌ Tải ảnh thất bại: {e}")
 
-            # ĐĂNG BÀI CHÍNH
             post_url = await bot.post(
                 text=job_content_normalized,
                 image_path=image_path,
@@ -585,7 +593,6 @@ async def run():
             )
             print(f"🔗 Post URL (Bài chính): {post_url}")
 
-            # ĐĂNG BÌNH LUẬN PHỤ
             if thread_content_normalized:
                 await bot.reply_to_post(
                     post_url=post_url, text=thread_content_normalized
