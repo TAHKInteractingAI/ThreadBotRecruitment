@@ -25,9 +25,11 @@ BASE_DIR = os.getcwd()
 CREDENTIAL_FILE = "credentials.json"
 RECRUIT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1YZrOO7Wb1fSCKeLNQnZMbXfNJuc7-kIz5ub1aXmzZdg/edit?usp=sharing"
 
+# ===== TÊN TAB =====
 RECRUIT_TAB_NAME = "Recruitment"
 ACCOUNT_TAB_NAME = "Accounts"
 
+# ===== TÊN CỘT TAB RECRUITMENT =====
 COL_POSITION = "Position"
 COL_JOB_CONTENT = "Job Content"
 COL_THREAD_CONTENT = "Thread Content"
@@ -52,7 +54,8 @@ DELAY_BETWEEN_POSTS = (60, 180)
 def normalize_threads_content(text: str) -> str:
     if not text:
         return ""
-    t = text.replace("\r\n", "\n").strip()
+    t = text.strip()
+    t = text.replace("\r\n", "\n")
     t = re.sub(r"[ \t]{2,}", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
@@ -117,6 +120,7 @@ def get_all_accounts():
     all_values = sheet.get_all_values()
     if len(all_values) < 2:
         return {}
+
     headers = all_values[0]
     records = [dict(zip(headers, row)) for row in all_values[1:]]
 
@@ -136,6 +140,7 @@ def get_unposted_rows(limit=MAX_POSTS_PER_RUN):
     all_values = sheet.get_all_values()
     if len(all_values) < 2:
         return []
+
     headers = all_values[0]
     rows = [dict(zip(headers, row)) for row in all_values[1:]]
 
@@ -192,7 +197,7 @@ class ThreadsBot:
         )
         os.makedirs(os.path.dirname(self.cookie_file), exist_ok=True)
 
-        # 👇 Thư mục dành riêng chứa ảnh lỗi
+        # 👇 ĐÃ VÁ LỖI: Tự động tạo thư mục chứa ảnh lỗi để GitHub quét được 👇
         self.error_dir = os.path.join(BASE_DIR, "error_logs")
         os.makedirs(self.error_dir, exist_ok=True)
 
@@ -305,6 +310,7 @@ class ThreadsBot:
             print(f"💾 Đã lưu Cookie mới vào: {self.cookie_file}")
 
         except Exception as e:
+            # 👇 Gom ảnh lỗi vào thư mục error_logs
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_login_{self.account_code}.png"
@@ -312,10 +318,10 @@ class ThreadsBot:
             )
             raise Exception(f"❌ Login tự động thất bại. Lỗi: {e}")
 
-    async def _get_latest_post_url(self) -> str:
+    async def _get_recent_post_urls(self) -> set:
         username = await self.get_profile_name()
         if not username:
-            return ""
+            return set()
         await self.page.goto(f"{THREADS_URL}/{username}", wait_until="networkidle")
         await self.page.wait_for_timeout(3000)
 
@@ -350,7 +356,7 @@ class ThreadsBot:
 
             await self.page.wait_for_timeout(3000)
 
-        # 👇 ĐÃ SỬA: Đẩy ảnh lỗi vào thư mục error_logs 👇
+        # 👇 Gom ảnh lỗi vào thư mục error_logs
         await self.page.screenshot(
             path=os.path.join(
                 self.error_dir, f"error_missing_post_{self.account_code}.png"
@@ -363,7 +369,7 @@ class ThreadsBot:
             raise ValueError("❌ Nội dung bài post trống")
 
         print("🔍 Đang ghi nhận danh sách bài cũ trên tường để đối chiếu...")
-        old_post_urls = await self._get_latest_post_url()
+        old_post_urls = await self._get_recent_post_urls()
 
         await self._open_composer()
         await self._type_text(text)
@@ -420,6 +426,7 @@ class ThreadsBot:
             print("✅ Đã đăng comment phụ thành công!")
             await self.page.wait_for_timeout(4000)
         except Exception as e:
+            # 👇 Gom ảnh lỗi vào thư mục error_logs
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_reply_{self.account_code}.png"
@@ -468,6 +475,7 @@ class ThreadsBot:
             time.sleep(random.uniform(*POST_DELAY_RANGE))
 
         except Exception as e:
+            # 👇 Gom ảnh lỗi vào thư mục error_logs
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_open_composer_{self.account_code}.png"
