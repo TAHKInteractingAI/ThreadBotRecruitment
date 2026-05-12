@@ -197,7 +197,6 @@ class ThreadsBot:
         )
         os.makedirs(os.path.dirname(self.cookie_file), exist_ok=True)
 
-        # 👇 ĐÃ VÁ LỖI: Tự động tạo thư mục chứa ảnh lỗi để GitHub quét được 👇
         self.error_dir = os.path.join(BASE_DIR, "error_logs")
         os.makedirs(self.error_dir, exist_ok=True)
 
@@ -274,7 +273,7 @@ class ThreadsBot:
                 ).first
                 if await switch_btn.is_visible(timeout=5000):
                     print("🔄 Đang click mở Form gõ Email/Password...")
-                    await switch_btn.click()
+                    await switch_btn.click(force=True)
                     await self.page.wait_for_timeout(2000)
             except Exception:
                 pass
@@ -310,7 +309,6 @@ class ThreadsBot:
             print(f"💾 Đã lưu Cookie mới vào: {self.cookie_file}")
 
         except Exception as e:
-            # 👇 Gom ảnh lỗi vào thư mục error_logs
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_login_{self.account_code}.png"
@@ -356,7 +354,6 @@ class ThreadsBot:
 
             await self.page.wait_for_timeout(3000)
 
-        # 👇 Gom ảnh lỗi vào thư mục error_logs
         await self.page.screenshot(
             path=os.path.join(
                 self.error_dir, f"error_missing_post_{self.account_code}.png"
@@ -412,12 +409,12 @@ class ThreadsBot:
                 "svg[aria-label='Trả lời'], svg[aria-label='Reply']"
             ).first
             await reply_btn.wait_for(state="visible", timeout=10000)
-            await reply_btn.click()
+            await reply_btn.click(force=True)  # Ép click nút trả lời
             await self.page.wait_for_timeout(2000)
 
-            editor = self.page.locator("div[contenteditable='true']").first
+            editor = self.page.locator("div[contenteditable='true']").last
             await editor.wait_for(state="visible", timeout=10000)
-            await editor.click()
+            await editor.click(force=True)
 
             await self._type_text(text)
             await self.page.wait_for_timeout(1000)
@@ -426,7 +423,6 @@ class ThreadsBot:
             print("✅ Đã đăng comment phụ thành công!")
             await self.page.wait_for_timeout(4000)
         except Exception as e:
-            # 👇 Gom ảnh lỗi vào thư mục error_logs
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_reply_{self.account_code}.png"
@@ -451,31 +447,30 @@ class ThreadsBot:
             try:
                 nav_btn = self.page.locator("a[href='/compose']").first
                 await nav_btn.wait_for(state="visible", timeout=3000)
-                await nav_btn.click()
+                await nav_btn.click(force=True)
             except:
                 try:
                     trigger_vi = self.page.locator("text='Có gì mới?'").first
                     await trigger_vi.wait_for(state="visible", timeout=3000)
-                    await trigger_vi.click()
+                    await trigger_vi.click(force=True)
                 except:
                     try:
                         trigger_en = self.page.locator('text="What\'s new?"').first
                         await trigger_en.wait_for(state="visible", timeout=3000)
-                        await trigger_en.click()
+                        await trigger_en.click(force=True)
                     except:
                         plus_btn = self.page.locator(
                             "svg[aria-label='Tạo'], svg[aria-label='Create'], svg[aria-label='Bắt đầu thread mới']"
                         ).first
-                        await plus_btn.click(timeout=5000)
+                        await plus_btn.click(force=True, timeout=5000)
 
             time.sleep(2)
             editor = self.page.locator("div[contenteditable='true']").first
             await editor.wait_for(state="visible", timeout=15000)
-            await editor.click()
+            await editor.click(force=True)
             time.sleep(random.uniform(*POST_DELAY_RANGE))
 
         except Exception as e:
-            # 👇 Gom ảnh lỗi vào thư mục error_logs
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_open_composer_{self.account_code}.png"
@@ -495,7 +490,8 @@ class ThreadsBot:
 
     async def _submit_post(self):
         try:
-            editor = self.page.locator("div[contenteditable='true']").first
+            # Lấy ô soạn thảo cuối cùng
+            editor = self.page.locator("div[contenteditable='true']").last
             await editor.click(force=True, timeout=2000)
             await self.page.wait_for_timeout(500)
         except:
@@ -581,7 +577,7 @@ async def run():
             account_code=acc_code,
             email=acc_info["email"],
             password=acc_info["password"],
-            headless=True,  # 👈 Chạy trên Github nhớ để True
+            headless=True,  # Nhớ để True khi up lên Github
         )
 
         image_path = None
