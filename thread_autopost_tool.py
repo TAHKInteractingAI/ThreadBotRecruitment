@@ -58,7 +58,7 @@ COL_ACC_ACTIVE = "Active"
 INACTIVE_VALUES = {"NO", "N", "FALSE", "0", "OFF", "INACTIVE", "DISABLED"}
 
 MAX_POSTS_PER_RUN = 999
-THREADS_URL = "https://www.threads.net"
+THREADS_URL = "https://www.threads.com"
 
 THREADS_CHAR_LIMIT = 480
 
@@ -971,7 +971,8 @@ class ThreadsBot:
         """
         Xác định /@username của tài khoản.
         1) Cột Username ở tab Accounts (nếu có)
-        2) Dò link 'Trang cá nhân' trên thanh menu trái (nhiều cách dự phòng)
+        2) Đọc URL sau khi mở nút 'Trang cá nhân/Profile'
+        3) Dò link profile trên thanh menu trái (nhiều cách dự phòng)
         """
         if self.profile_path:
             return self.profile_path
@@ -984,10 +985,38 @@ class ThreadsBot:
         await self._goto(THREADS_URL)
         await self._dismiss_popups()
 
+        def profile_path_from_url() -> str:
+            match = re.search(r"https?://[^/]+(/@[^/?#]+)", self.page.url)
+            return match.group(1).rstrip("/") if match else ""
+
+        async def open_profile_button() -> str:
+            try:
+                button = self.page.get_by_role(
+                    "button",
+                    name=re.compile(r"(Trang cá nhân|Profile)", re.IGNORECASE),
+                ).first
+                if await button.is_visible():
+                    await button.click(force=True)
+                    await self.page.wait_for_timeout(1500)
+                    return profile_path_from_url()
+            except Exception:
+                pass
+            return ""
+
+        path = profile_path_from_url()
+        if not path:
+            path = await open_profile_button()
+        if path:
+            self.profile_path = path
+            print(f"👤 Trang cá nhân: {self.profile_path}")
+            return self.profile_path
+
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
             try:
-                path = await self.page.evaluate(PROFILE_PATH_JS)
+                path = profile_path_from_url() or await self.page.evaluate(
+                    PROFILE_PATH_JS
+                )
             except Exception:
                 path = ""
             if path:
