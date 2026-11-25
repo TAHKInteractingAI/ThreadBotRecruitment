@@ -28,15 +28,22 @@ jobs:
         run: |
           echo "$GCP_CREDS" > credentials.json
 
+      - name: Tính hash cookie nguồn
+        id: cookie-hash
+        shell: pwsh
+        run: |
+          $hash = "${{ hashFiles('cookies/*.json', '!cookies/profile_paths.json') }}"
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+
       - name: Khôi phục Cookie đã làm mới từ lần chạy trước
         uses: actions/cache/restore@v4
         with:
           path: |
             cookies/*.json
             !cookies/profile_paths.json
-          key: cookies-${{ runner.os }}-${{ github.run_id }}
+          key: cookies-${{ runner.os }}-${{ steps.cookie-hash.outputs.hash }}-${{ github.run_id }}
           restore-keys: |
-            cookies-${{ runner.os }}-
+            cookies-${{ runner.os }}-${{ steps.cookie-hash.outputs.hash }}-
 
       - name: Chạy Tool Auto Post
         env:
@@ -51,7 +58,7 @@ jobs:
           path: |
             cookies/*.json
             !cookies/profile_paths.json
-          key: cookies-${{ runner.os }}-${{ github.run_id }}
+          key: cookies-${{ runner.os }}-${{ steps.cookie-hash.outputs.hash }}-${{ github.run_id }}
 
       - name: Lưu ảnh chụp màn hình khi bị lỗi
         if: always()

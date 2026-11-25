@@ -1124,6 +1124,9 @@ class ThreadsBot:
             await self.page.wait_for_timeout(1500)
             await self._raise_if_disabled()
 
+            if await self._has_authenticated_ui(wait_s=1):
+                break
+
             if await self._is_checkpoint_screen():
                 await self.page.screenshot(
                     path=os.path.join(
@@ -1157,15 +1160,15 @@ class ThreadsBot:
         await self._dismiss_popups()
         await self._raise_if_disabled()
 
-        if await self._is_checkpoint_screen():
-            await self.page.screenshot(
-                path=os.path.join(
-                    self.error_dir, f"error_checkpoint_{self.account_code}.png"
-                )
-            )
-            raise AccountLoginError("Vướng Checkpoint / 2FA / Captcha")
-
         if not await self._has_authenticated_ui(wait_s=10):
+            if await self._is_checkpoint_screen():
+                await self.page.screenshot(
+                    path=os.path.join(
+                        self.error_dir, f"error_checkpoint_{self.account_code}.png"
+                    )
+                )
+                raise AccountLoginError("Vướng Checkpoint / 2FA / Captcha")
+
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_login_{self.account_code}.png"
