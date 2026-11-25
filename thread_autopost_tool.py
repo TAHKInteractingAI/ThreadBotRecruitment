@@ -23,6 +23,13 @@ from playwright.async_api import async_playwright
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+# Đảm bảo log stdout/stderr xả ngay theo từng dòng (tránh lệch thứ tự trên CI)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
 # =========================
 # CONFIGURATION
 # =========================
@@ -87,6 +94,7 @@ GOTO_ATTEMPTS = 3
 
 DISABLED_CACHE_FILE = os.path.join(BASE_DIR, "disabled_accounts.json")
 DISABLED_RECHECK_HOURS = 24
+PROFILE_CACHE_FILE = os.path.join(BASE_DIR, "cookies", "profile_paths.json")
 
 UNSYNCED_FILE = os.path.join(BASE_DIR, "unsynced_status.jsonl")
 
@@ -101,9 +109,63 @@ DISABLED_MARKERS = [
     "tài khoản của bạn đã bị đình chỉ",
 ]
 
+GUEST_EXACT_MARKERS = [
+    "Đăng nhập hoặc đăng ký",
+    "Đăng nhập bằng tên người dùng",
+    "Bày tỏ nhiều hơn qua Threads",
+    "Tiếp tục bằng Instagram",
+    "Continue with Instagram",
+    "Say more with Threads",
+    "Log in with phone",
+    "Log in or sign up",
+    "Log in to Threads",
+]
+
+CHECKPOINT_URL_PARTS = (
+    "/challenge",
+    "/checkpoint",
+    "/two_factor",
+    "/accounts/login/two_factor",
+)
+
+CHECKPOINT_MARKERS = [
+    "nhập mã",
+    "mã xác nhận",
+    "mã bảo mật",
+    "xác nhận danh tính",
+    "hoạt động bất thường",
+    "chúng tôi phát hiện",
+    "xác minh hai yếu tố",
+    "enter code",
+    "security code",
+    "confirmation code",
+    "confirm it's you",
+    "unusual login",
+    "suspicious login",
+    "two-factor",
+    "captcha",
+]
+
+LOGIN_ERROR_MARKERS = [
+    "tên người dùng hoặc mật khẩu không đúng",
+    "mật khẩu của bạn không đúng",
+    "không thuộc về tài khoản nào",
+    "sorry, your password was incorrect",
+    "password you entered is incorrect",
+    "doesn't belong to an account",
+]
+
 
 class AccountDisabledError(Exception):
     """Tài khoản Threads bị vô hiệu hóa/khóa, không thể dùng được nữa."""
+
+
+class AccountLoginError(Exception):
+    """Đăng nhập thất bại / hết phiên / kẹt checkpoint-2FA-Captcha (bỏ qua trong phiên)."""
+
+
+class ProfileResolutionError(Exception):
+    """Không dò được profile sau khi đã xác nhận phiên đăng nhập."""
 
 
 class PostUnverifiedError(Exception):
@@ -625,6 +687,45 @@ def remember_disabled(account_code: str):
     _save_disabled_cache(cache)
 
 
+def _load_profile_cache() -> dict:
+    try:
+        with open(PROFILE_CACHE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"⚠ Không đọc được cache profile {PROFILE_CACHE_FILE}: {e}")
+        return {}
+
+    if not isinstance(data, dict):
+        print(f"⚠ Cache profile {PROFILE_CACHE_FILE} không đúng định dạng.")
+        return {}
+
+    profiles = {}
+    for account_code, profile_path in data.items():
+        code = str(account_code).strip().upper()
+        path = str(profile_path).strip().rstrip("/")
+        if code and re.fullmatch(r"/@[A-Za-z0-9._]+", path):
+            profiles[code] = path
+    return profiles
+
+
+def remember_profile_path(account_code: str, profile_path: str):
+    code = account_code.strip().upper()
+    path = profile_path.strip().rstrip("/")
+    if not code or not re.fullmatch(r"/@[A-Za-z0-9._]+", path):
+        raise ValueError(f"Profile path không hợp lệ cho tài khoản {account_code}")
+
+    profiles = _load_profile_cache()
+    profiles[code] = path
+    try:
+        os.makedirs(os.path.dirname(PROFILE_CACHE_FILE), exist_ok=True)
+        with open(PROFILE_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(profiles, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        print(f"⚠ Không lưu được cache profile {PROFILE_CACHE_FILE}: {e}")
+
+
 def mark_account_disabled_row(row_index: int, account_code: str):
     """Tài khoản bị khóa: ghi 'Account disabled' vào cột Posted (không phải YES nên dòng vẫn chờ đăng)."""
     return _safe_write_status(
@@ -646,22 +747,35 @@ def get_existing_post_url(data: dict) -> str:
 PROFILE_PATH_JS = """
 () => {
   const labelRe = /trang cá nhân|profile|hồ sơ/i;
-  const isProfilePath = (p) => /^\\/@[^\\/]+\\/?$/.test(p);
+  const isProfilePath = (p) => /^\\/@[^\\/]+\\/?$/.test(p || '');
   const anchors = [...document.querySelectorAll('a[href*="/@"]')]
-    .filter(a => isProfilePath(a.pathname));
+    .filter(a => isProfilePath(a.pathname) && !a.closest('article'));
 
-  const byLabel = anchors.find(a => {
-    if (labelRe.test(a.getAttribute('aria-label') || '')) return true;
-    return [...a.querySelectorAll('svg[aria-label]')]
-      .some(s => labelRe.test(s.getAttribute('aria-label') || ''));
-  });
+  const getLabel = (el) => [
+    el.getAttribute('aria-label') || '',
+    el.getAttribute('title') || '',
+    ...[...el.querySelectorAll('svg[aria-label]')].map(s => s.getAttribute('aria-label') || ''),
+    ...[...el.querySelectorAll('svg title')].map(t => t.textContent || ''),
+  ].join(' ');
+
+  const byLabel = anchors.find(a => labelRe.test(getLabel(a)));
   if (byLabel) return byLabel.pathname;
+
+  const inNav = anchors.find(a => a.closest('nav, header'));
+  if (inNav) return inNav.pathname;
 
   const rail = anchors.filter(a => {
     const r = a.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && r.left < 150 && (a.innerText || '').trim() === '';
+    return r.width > 0 && r.height > 0 && r.left < 180 && (a.querySelector('svg') || (a.innerText || '').trim() === '');
   });
   if (rail.length) return rail[0].pathname;
+
+  for (const s of document.querySelectorAll('script[type="application/json"]')) {
+    const txt = s.textContent || '';
+    if (!txt.includes('viewer') && !txt.includes('logged_in_user')) continue;
+    const m = txt.match(/"(?:viewer|logged_in_user)"\\s*:\\s*\\{[\\s\\S]{0,250}?"username"\\s*:\\s*"([a-zA-Z0-9._]+)"/);
+    if (m && m[1]) return '/@' + m[1];
+  }
   return '';
 }
 """
@@ -809,6 +923,7 @@ class ThreadsBot:
 
         await self._goto(THREADS_URL)
         await self._raise_if_disabled()
+        await self._dismiss_popups()
         is_logged_in = await self._is_logged_in()
 
         if not is_logged_in:
@@ -817,9 +932,12 @@ class ThreadsBot:
             )
             try:
                 await self._login()
-            except Exception:
+            except (AccountDisabledError, AccountLoginError):
                 await self._raise_if_disabled()
                 raise
+            except Exception as e:
+                await self._raise_if_disabled()
+                raise AccountLoginError(f"Auto-login thất bại: {e}") from e
             await self._raise_if_disabled()
         else:
             print(f"✅ Tài khoản {self.account_code} đăng nhập thành công bằng Cookie.")
@@ -827,17 +945,20 @@ class ThreadsBot:
     async def _raise_if_disabled(self):
         """Phát hiện trang 'Chúng tôi đã vô hiệu hóa tài khoản của bạn'."""
         try:
-            await self.page.wait_for_timeout(2000)
+            await self.page.wait_for_timeout(1500)
             body_text = (await self.page.inner_text("body")).lower()
         except Exception:
             return
 
         if any(marker in body_text for marker in DISABLED_MARKERS):
-            await self.page.screenshot(
-                path=os.path.join(
-                    self.error_dir, f"account_disabled_{self.account_code}.png"
+            try:
+                await self.page.screenshot(
+                    path=os.path.join(
+                        self.error_dir, f"account_disabled_{self.account_code}.png"
+                    )
                 )
-            )
+            except Exception:
+                pass
             raise AccountDisabledError(
                 f"Tài khoản {self.account_code} bị Threads vô hiệu hóa/khóa"
             )
@@ -859,21 +980,76 @@ class ThreadsBot:
         except Exception:
             pass
 
-    async def _is_logged_in(self) -> bool:
+    async def _has_guest_or_login_ui(self) -> bool:
+        """Nhận diện màn hình khách / yêu cầu đăng nhập / checkpoint."""
         try:
-            await self.page.wait_for_timeout(3000)
-            if "/login" in self.page.url:
+            url = (self.page.url or "").lower()
+            if "/login" in url or "instagram.com/accounts/login" in url:
+                return True
+            if any(part in url for part in CHECKPOINT_URL_PARTS):
+                return True
+
+            for marker in GUEST_EXACT_MARKERS:
+                loc = self.page.get_by_text(
+                    re.compile(rf"^\s*{re.escape(marker)}\s*$", re.IGNORECASE)
+                ).first
+                if await loc.is_visible():
+                    return True
+
+            login_pattern = re.compile(r"^(Đăng nhập|Log in)$", re.IGNORECASE)
+            for role in ("button", "link"):
+                if await self.page.get_by_role(role, name=login_pattern).first.is_visible():
+                    return True
+            return False
+        except Exception:
+            return False
+
+    async def _is_checkpoint_screen(self) -> bool:
+        """Nhận diện màn hình Checkpoint / 2FA / Captcha khi đang đăng nhập."""
+        try:
+            url = (self.page.url or "").lower()
+            if any(part in url for part in CHECKPOINT_URL_PARTS):
+                return True
+            body_text = (await self.page.inner_text("body")).lower()
+            return any(marker in body_text for marker in CHECKPOINT_MARKERS)
+        except Exception:
+            return False
+
+    async def _has_authenticated_ui(self, wait_s: int = 8) -> bool:
+        """
+        Kiểm tra KHẲNG ĐỊNH tài khoản đã vào được giao diện đã đăng nhập thật.
+        Không dùng tín hiệu mơ hồ (icon +/tim vì chế độ khách vẫn có).
+        """
+        end = time.monotonic() + wait_s
+        while time.monotonic() < end:
+            if await self._has_guest_or_login_ui():
                 return False
 
-            guest_texts = [
-                "Đăng nhập hoặc đăng ký",
-                "Đăng nhập bằng tên người dùng",
-                "Log in with phone",
-            ]
-            for t in guest_texts:
-                if await self.page.get_by_text(t, exact=True).first.is_visible():
-                    return False
-            return True
+            try:
+                path = await self.page.evaluate(PROFILE_PATH_JS)
+                if path:
+                    if not self.profile_path:
+                        self.profile_path = path.rstrip("/")
+                    return True
+            except Exception:
+                pass
+
+            for text in ("Có gì mới?", "What's new?"):
+                try:
+                    if await self.page.get_by_text(text, exact=True).first.is_visible():
+                        return True
+                except Exception:
+                    pass
+
+            await self.page.wait_for_timeout(500)
+        return False
+
+    async def _is_logged_in(self) -> bool:
+        try:
+            await self.page.wait_for_timeout(1500)
+            if await self._has_guest_or_login_ui():
+                return False
+            return await self._has_authenticated_ui(wait_s=8)
         except Exception:
             return False
 
@@ -893,23 +1069,32 @@ class ThreadsBot:
 
     async def _login(self):
         await self._goto(f"{THREADS_URL}/login")
-        try:
-            await self.page.wait_for_timeout(3000)
-            try:
-                clicked = await self._click_first_visible_text(
-                    [
-                        "Đăng nhập bằng tên người dùng",
-                        "Log in with phone",
-                        "Log in with email",
-                    ],
-                    timeout_ms=5000,
+        await self._raise_if_disabled()
+        if await self._is_checkpoint_screen():
+            await self.page.screenshot(
+                path=os.path.join(
+                    self.error_dir, f"error_checkpoint_{self.account_code}.png"
                 )
-                if clicked:
-                    print("🔄 Đang click mở Form gõ Email/Password...")
-                    await self.page.wait_for_timeout(2000)
-            except Exception:
-                pass
+            )
+            raise AccountLoginError("Vướng màn hình Checkpoint/2FA ngay tại trang login")
 
+        try:
+            clicked = await self._click_first_visible_text(
+                [
+                    "Đăng nhập bằng tên người dùng",
+                    "Log in with phone",
+                    "Log in with email",
+                    "Log in with username",
+                ],
+                timeout_ms=5000,
+            )
+            if clicked:
+                print("🔄 Đang click mở Form gõ Email/Password...")
+                await self.page.wait_for_timeout(2000)
+        except Exception:
+            pass
+
+        try:
             await self.page.wait_for_selector(
                 'input[type="text"], input[name="username"]', timeout=10000
             )
@@ -925,37 +1110,75 @@ class ThreadsBot:
 
             print("🔄 Đang nhấn phím Enter để Đăng nhập...")
             await self.page.keyboard.press("Enter")
-            await self.page.wait_for_timeout(6000)
-
-            await self.page.wait_for_timeout(5000)
-            still_guest = False
-            if await self.page.get_by_text(
-                "Đăng nhập bằng tên người dùng", exact=True
-            ).first.is_visible():
-                still_guest = True
-            elif await self.page.locator(
-                "button:has-text('Đăng nhập'), button:has-text('Log in')"
-            ).first.is_visible():
-                still_guest = True
-            if still_guest:
-                raise Exception(
-                    "Kẹt ở màn hình đăng nhập (Bị vướng Captcha hoặc Checkpoint). Hãy dùng script get_cookie trên máy tính."
-                )
-
-            print(f"✅ Đăng nhập xong cho {self.account_code}!")
-            await self.context.storage_state(path=self.cookie_file)
-            print(f"💾 Đã lưu Cookie mới vào: {self.cookie_file}")
-
-            await self._goto(THREADS_URL)
-            await self._dismiss_popups()
-
         except Exception as e:
             await self.page.screenshot(
                 path=os.path.join(
                     self.error_dir, f"error_login_{self.account_code}.png"
                 )
             )
-            raise Exception(f"❌ Login tự động thất bại. Lỗi: {e}")
+            raise AccountLoginError(f"Không điền được form đăng nhập: {e}")
+
+        # Chờ phản hồi sau đăng nhập (tối đa 15s)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            await self.page.wait_for_timeout(1500)
+            await self._raise_if_disabled()
+
+            if await self._is_checkpoint_screen():
+                await self.page.screenshot(
+                    path=os.path.join(
+                        self.error_dir, f"error_checkpoint_{self.account_code}.png"
+                    )
+                )
+                raise AccountLoginError(
+                    "Vướng Checkpoint / 2FA / Captcha sau khi gửi thông tin đăng nhập"
+                )
+
+            try:
+                body_lower = (await self.page.inner_text("body")).lower()
+            except Exception:
+                body_lower = ""
+
+            if any(m in body_lower for m in LOGIN_ERROR_MARKERS):
+                await self.page.screenshot(
+                    path=os.path.join(
+                        self.error_dir, f"error_login_{self.account_code}.png"
+                    )
+                )
+                raise AccountLoginError("Sai email/username hoặc mật khẩu")
+
+            url = (self.page.url or "").lower()
+            if "/login" not in url and not await self._has_guest_or_login_ui():
+                break
+
+        await self._dismiss_popups()
+        if not (self.page.url or "").startswith(THREADS_URL):
+            await self._goto(THREADS_URL)
+        await self._dismiss_popups()
+        await self._raise_if_disabled()
+
+        if await self._is_checkpoint_screen():
+            await self.page.screenshot(
+                path=os.path.join(
+                    self.error_dir, f"error_checkpoint_{self.account_code}.png"
+                )
+            )
+            raise AccountLoginError("Vướng Checkpoint / 2FA / Captcha")
+
+        if not await self._has_authenticated_ui(wait_s=10):
+            await self.page.screenshot(
+                path=os.path.join(
+                    self.error_dir, f"error_login_{self.account_code}.png"
+                )
+            )
+            raise AccountLoginError(
+                "Login tự động chưa vào được phiên Threads (không lưu cookie hỏng). "
+                "Xem error_logs/error_login_*.png hoặc lấy lại cookie bằng login.py + get_cookie.py."
+            )
+
+        print(f"✅ Đăng nhập xong cho {self.account_code}!")
+        await self.context.storage_state(path=self.cookie_file)
+        print(f"💾 Đã lưu Cookie mới vào: {self.cookie_file}")
 
     async def _dismiss_popups(self):
         """Đóng các popup thường gặp (best-effort, lỗi thì bỏ qua)."""
@@ -971,48 +1194,76 @@ class ThreadsBot:
         """
         Xác định /@username của tài khoản.
         1) Cột Username ở tab Accounts (nếu có)
-        2) Đọc URL sau khi mở nút 'Trang cá nhân/Profile'
-        3) Dò link profile trên thanh menu trái (nhiều cách dự phòng)
+        2) Đọc URL / DOM / JSON viewer trên trang chủ
+        3) Bấm nút 'Trang cá nhân/Profile' (link hoặc button)
         """
         if self.profile_path:
+            remember_profile_path(self.account_code, self.profile_path)
             return self.profile_path
 
         if self.username:
             self.profile_path = f"/@{self.username}"
+            remember_profile_path(self.account_code, self.profile_path)
             print(f"👤 Dùng Username từ sheet: {self.profile_path}")
             return self.profile_path
 
         await self._goto(THREADS_URL)
         await self._dismiss_popups()
+        await self._raise_if_disabled()
+
+        if await self._has_guest_or_login_ui():
+            await self._dump_debug("session_expired")
+            raise AccountLoginError("Phiên đăng nhập đã hết hạn (màn hình khách/Instagram)")
+
+        cached_path = _load_profile_cache().get(self.account_code.upper())
+        if cached_path:
+            self.profile_path = cached_path
+            print(f"📌 Dùng profile đã lưu cho {self.account_code}: {self.profile_path}")
+            return self.profile_path
 
         def profile_path_from_url() -> str:
             match = re.search(r"https?://[^/]+(/@[^/?#]+)", self.page.url)
             return match.group(1).rstrip("/") if match else ""
 
         async def open_profile_button() -> str:
-            try:
-                button = self.page.get_by_role(
-                    "button",
-                    name=re.compile(r"(Trang cá nhân|Profile)", re.IGNORECASE),
-                ).first
-                if await button.is_visible():
-                    await button.click(force=True)
-                    await self.page.wait_for_timeout(1500)
-                    return profile_path_from_url()
-            except Exception:
-                pass
+            name_re = re.compile(r"(Trang cá nhân|Profile|Hồ sơ)", re.IGNORECASE)
+            for role in ("link", "button"):
+                try:
+                    el = self.page.get_by_role(role, name=name_re).first
+                    if await el.is_visible():
+                        await el.click(force=True)
+                        await self.page.wait_for_timeout(1500)
+                        if await self._has_guest_or_login_ui():
+                            await self._dump_debug("session_expired")
+                            raise AccountLoginError(
+                                "Phiên đăng nhập đã hết hạn khi mở trang cá nhân"
+                            )
+                        return profile_path_from_url()
+                except AccountLoginError:
+                    raise
+                except Exception:
+                    pass
             return ""
 
         path = profile_path_from_url()
         if not path:
+            try:
+                path = await self.page.evaluate(PROFILE_PATH_JS)
+            except Exception:
+                path = ""
+        if not path:
             path = await open_profile_button()
         if path:
-            self.profile_path = path
+            self.profile_path = path.rstrip("/")
+            remember_profile_path(self.account_code, self.profile_path)
             print(f"👤 Trang cá nhân: {self.profile_path}")
             return self.profile_path
 
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
+            if await self._has_guest_or_login_ui():
+                await self._dump_debug("session_expired")
+                raise AccountLoginError("Phiên đăng nhập đã hết hạn")
             try:
                 path = profile_path_from_url() or await self.page.evaluate(
                     PROFILE_PATH_JS
@@ -1021,6 +1272,7 @@ class ThreadsBot:
                 path = ""
             if path:
                 self.profile_path = path.rstrip("/")
+                remember_profile_path(self.account_code, self.profile_path)
                 print(f"👤 Trang cá nhân: {self.profile_path}")
                 return self.profile_path
             await self.page.wait_for_timeout(1000)
@@ -1061,9 +1313,9 @@ class ThreadsBot:
             raise ValueError("❌ Nội dung bài post trống")
 
         if not await self._resolve_profile_path():
-            raise Exception(
-                "Không xác định được trang cá nhân → CHƯA đăng bài (xem error_logs/error_get_profile_*.png/.html). "
-                f"Có thể thêm cột '{COL_ACC_USERNAME}' vào tab {ACCOUNT_TAB_NAME} để bỏ qua bước dò."
+            raise ProfileResolutionError(
+                f"Không xác định được trang cá nhân cho {self.account_code} → CHƯA đăng bài. "
+                "Đã lưu ảnh/HTML vào error_logs để chẩn đoán."
             )
 
         print("🔍 Đang ghi nhận danh sách bài cũ trên tường để đối chiếu...")
@@ -1166,7 +1418,7 @@ class ThreadsBot:
                     print(f"✅ Đã đăng comment {n}/{total} thành công!")
                     last_error = None
                     break
-                except AccountDisabledError:
+                except (AccountDisabledError, AccountLoginError):
                     raise
                 except Exception as e:
                     last_error = e
@@ -1263,6 +1515,8 @@ class ThreadsBot:
         await self._goto(post_url)
         await self._dismiss_popups()
         await self._raise_if_disabled()
+        if await self._has_guest_or_login_ui():
+            raise AccountLoginError("Phiên đăng nhập hết hạn khi chuẩn bị comment")
         await self.page.wait_for_timeout(random.randint(2000, 4000))
 
         await self._open_reply_editor()
@@ -1314,11 +1568,16 @@ class ThreadsBot:
                         await plus_btn.click(force=True, timeout=5000)
 
             await self.page.wait_for_timeout(2000)
+            if await self._has_guest_or_login_ui():
+                raise AccountLoginError("Phiên đăng nhập hết hạn khi mở khung đăng bài")
+
             editor = self.page.locator("div[contenteditable='true']").first
             await editor.wait_for(state="visible", timeout=15000)
             await editor.click(force=True)
             await self._pause(POST_DELAY_RANGE)
 
+        except AccountLoginError:
+            raise
         except Exception as e:
             await self.page.screenshot(
                 path=os.path.join(
@@ -1469,6 +1728,8 @@ async def run():
 
     disabled_accounts = recently_disabled_codes()
     newly_disabled = set()
+    session_login_failed = set()
+    session_profile_failed = set()
     if disabled_accounts:
         print(f"🚫 Bỏ qua (đã phát hiện bị khóa gần đây): {', '.join(sorted(disabled_accounts))}")
     inactive_rows = {}
@@ -1534,6 +1795,22 @@ async def run():
             if status not in (STATUS_REPLY_ERROR, STATUS_ACCOUNT_DISABLED.upper()):
                 mark_account_disabled_row(row_index, acc_code)
             inactive_rows[acc_code] = inactive_rows.get(acc_code, 0) + 1
+            summary["skipped"] += 1
+            continue
+
+        if acc_code.upper() in session_login_failed:
+            print(
+                f"⏭ Tài khoản {acc_code} đã lỗi login/checkpoint ở bài trước trong phiên này "
+                "→ SKIP (giữ nguyên trạng thái trên sheet để lần sau thử lại)"
+            )
+            summary["skipped"] += 1
+            continue
+
+        if acc_code.upper() in session_profile_failed:
+            print(
+                f"⏭ Tài khoản {acc_code} đã lỗi dò profile ở bài trước trong phiên này "
+                "→ SKIP (giữ nguyên trạng thái trên sheet để lần sau thử lại)"
+            )
             summary["skipped"] += 1
             continue
 
@@ -1616,7 +1893,7 @@ async def run():
                     await bot.reply_to_post(
                         post_url=post_url, texts=reply_parts, main_text=main_text
                     )
-                except AccountDisabledError:
+                except (AccountDisabledError, AccountLoginError):
                     raise
                 except Exception as reply_err:
                     print(f"❌ Comment phụ thất bại: {reply_err}")
@@ -1644,6 +1921,28 @@ async def run():
             elif status != STATUS_REPLY_ERROR:
                 mark_account_disabled_row(row_index, acc_code)
 
+        except ProfileResolutionError as e:
+            print(f"👤 LỖI DÒ PROFILE CHO {acc_code}: {e}")
+            session_profile_failed.add(acc_code.upper())
+            skip_wait = True
+            if post_url and not existing_post_url:
+                mark_reply_error(row_index=row_index, post_url=post_url)
+                summary["reply_error"] += 1
+            else:
+                mark_error(row_index, f"❌ {str(e)[:180]}")
+                summary["error"] += 1
+
+        except AccountLoginError as e:
+            print(f"🔐 LỖI ĐĂNG NHẬP / PHIÊN CHO {acc_code}: {e}")
+            session_login_failed.add(acc_code.upper())
+            skip_wait = True
+            if post_url and not existing_post_url:
+                mark_reply_error(row_index=row_index, post_url=post_url)
+                summary["reply_error"] += 1
+            else:
+                mark_error(row_index, f"❌ Lỗi login: {str(e)[:180]}")
+                summary["error"] += 1
+
         except PostUnverifiedError as e:
             print(f"🔎 {e}")
             mark_check(row_index, f"⚠ Cần kiểm tra thủ công: {str(e)[:180]}")
@@ -1652,7 +1951,7 @@ async def run():
         except Exception as e:
             print(f"❌ LỖI ĐĂNG BÀI CHO {acc_code}")
             print(str(e))
-            traceback.print_exc()
+            print(traceback.format_exc())
             if post_url and not existing_post_url:
                 mark_reply_error(row_index=row_index, post_url=post_url)
             else:
@@ -1679,6 +1978,16 @@ async def run():
     )
     if newly_disabled:
         print(f"🚫 Tài khoản vừa phát hiện bị khóa: {', '.join(sorted(newly_disabled))}")
+    if session_login_failed:
+        print(
+            "🔐 Tài khoản lỗi login/checkpoint trong phiên (đã bỏ qua các dòng sau): "
+            + ", ".join(sorted(session_login_failed))
+        )
+    if session_profile_failed:
+        print(
+            "👤 Tài khoản lỗi dò profile trong phiên (đã bỏ qua các dòng sau): "
+            + ", ".join(sorted(session_profile_failed))
+        )
     if inactive_rows:
         detail = ", ".join(f"{c} ({n} dòng)" for c, n in sorted(inactive_rows.items()))
         print(

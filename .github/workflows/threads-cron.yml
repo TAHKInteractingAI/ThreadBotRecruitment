@@ -1,11 +1,11 @@
 name: Threads Auto Post Cronjob
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   post-threads:
-    runs-on: windows-latest 
+    runs-on: windows-latest
 
     steps:
       - name: Checkout mã nguồn
@@ -14,7 +14,7 @@ jobs:
       - name: Cài đặt môi trường Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Cài đặt thư viện cần thiết
         run: |
@@ -28,13 +28,33 @@ jobs:
         run: |
           echo "$GCP_CREDS" > credentials.json
 
+      - name: Khôi phục Cookie đã làm mới từ lần chạy trước
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            cookies/*.json
+            !cookies/profile_paths.json
+          key: cookies-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            cookies-${{ runner.os }}-
+
       - name: Chạy Tool Auto Post
         env:
-          PYTHONIOENCODING: 'utf-8'
-        run: python thread_autopost_tool.py
-        
+          PYTHONIOENCODING: "utf-8"
+          PYTHONUNBUFFERED: "1"
+        run: python -u thread_autopost_tool.py
+
+      - name: Lưu lại Cookie mới sau phiên chạy
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            cookies/*.json
+            !cookies/profile_paths.json
+          key: cookies-${{ runner.os }}-${{ github.run_id }}
+
       - name: Lưu ảnh chụp màn hình khi bị lỗi
-        if: always() 
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: error-screenshots
