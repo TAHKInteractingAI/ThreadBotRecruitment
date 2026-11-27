@@ -1,1 +1,141 @@
-{"cookies": [{"name": "ig_did", "value": "93721586-41E9-4073-BBB5-AE7C5115571D", "domain": ".threads.net", "path": "/", "expires": 1807296277.537069, "httpOnly": true, "secure": true, "sameSite": "None"}, {"name": "ig_did", "value": "7F384986-67FD-403D-8570-34F38AF9E3EA", "domain": ".threads.com", "path": "/", "expires": 1807296277.859385, "httpOnly": true, "secure": true, "sameSite": "None"}, {"name": "dpr", "value": "1.5", "domain": ".threads.com", "path": "/", "expires": 1776365159, "httpOnly": false, "secure": true, "sameSite": "None"}, {"name": "mid", "value": "adfzvAALAAEjJ4NZVRuk1Krr4fHn", "domain": ".threads.com", "path": "/", "expires": 1810320319.653468, "httpOnly": false, "secure": true, "sameSite": "Lax"}, {"name": "csrftoken", "value": "3uuq0yyaQ9KgKIJn278l9t", "domain": ".instagram.com", "path": "/", "expires": 1810320351.059451, "httpOnly": false, "secure": true, "sameSite": "Lax"}, {"name": "datr", "value": "yvPXadoU_LI8BfplMPoZB3BV", "domain": ".instagram.com", "path": "/", "expires": 1810320330.345689, "httpOnly": true, "secure": true, "sameSite": "None"}, {"name": "ig_did", "value": "08401AF1-7D09-4A76-8B82-E2818E6A618C", "domain": ".instagram.com", "path": "/", "expires": 1807296330.345713, "httpOnly": true, "secure": true, "sameSite": "None"}, {"name": "dpr", "value": "1.5", "domain": ".instagram.com", "path": "/", "expires": 1776365149, "httpOnly": false, "secure": true, "sameSite": "None"}, {"name": "wd", "value": "1280x585", "domain": ".instagram.com", "path": "/", "expires": 1776365149, "httpOnly": false, "secure": true, "sameSite": "Lax"}, {"name": "mid", "value": "adfzygALAAHu3cD3UTbU2K2jfFfo", "domain": ".instagram.com", "path": "/", "expires": 1810320331, "httpOnly": false, "secure": true, "sameSite": "Lax"}, {"name": "ds_user_id", "value": "78141039486", "domain": ".instagram.com", "path": "/", "expires": 1783536351.059724, "httpOnly": false, "secure": true, "sameSite": "None"}, {"name": "sessionid", "value": "78141039486%3AXf2nRTopkoVQx6%3A28%3AAYjMQcujl4aeO_9wspZ9fD_p0H2NYLUPx3bXZk4vvw", "domain": ".instagram.com", "path": "/", "expires": 1807296347.590583, "httpOnly": true, "secure": true, "sameSite": "None"}, {"name": "test_cookie", "value": "CheckForPermission", "domain": ".doubleclick.net", "path": "/", "expires": 1775761251.886519, "httpOnly": false, "secure": true, "sameSite": "None"}, {"name": "csrftoken", "value": "7q8NRP9VKEIDmFAvChy3AKNeXFpC7pEZ", "domain": ".threads.com", "path": "/", "expires": 1810320358.843785, "httpOnly": false, "secure": true, "sameSite": "Lax"}, {"name": "ds_user_id", "value": "79751818054", "domain": ".threads.com", "path": "/", "expires": 1783536358.843964, "httpOnly": false, "secure": true, "sameSite": "None"}, {"name": "sessionid", "value": "79751818054%3AMFPK0Z8vGLCpkZ%3A20%3AAYhlV8QN0WxIZlo0-2mVSYhZ6pwvSuqcy2VFK1Ac4Q", "domain": ".threads.com", "path": "/", "expires": 1807296352.92861, "httpOnly": true, "secure": true, "sameSite": "None"}, {"name": "ps_l", "value": "1", "domain": ".threads.com", "path": "/", "expires": 1810320353.657009, "httpOnly": true, "secure": true, "sameSite": "Lax"}, {"name": "ps_n", "value": "1", "domain": ".threads.com", "path": "/", "expires": 1810320353.657121, "httpOnly": true, "secure": true, "sameSite": "None"}], "origins": []}
+{
+  "cookies": [
+    {
+      "name": "_GRECAPTCHA",
+      "value": "09AKhCRwjKNfAT29cPOIifroMbW6nSWoBc8u6-LDdJ2DEKDNhbKFiRLOwNdQCG10KscVTVUHBSmiiMO-WG1QBmgp0",
+      "domain": "www.google.com",
+      "path": "/recaptcha",
+      "expires": 1811294067.839486,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "ig_did",
+      "value": "463B4F60-B16D-48B2-88E0-F9AE05A04069",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1827278035.232924,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "mid",
+      "value": "awjZbAALAAELHP0E7lsVbOEmU-UZ",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1830302062.879014,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ps_l",
+      "value": "1",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1830302063.860824,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ps_n",
+      "value": "1",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1830302063.861124,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "csrftoken",
+      "value": "bG6GVRpU9b8wT8WVQtwANmV0m5tUlT9B",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1830302123.193477,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ds_user_id",
+      "value": "79751818054",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1803518123.19361,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "sessionid",
+      "value": "79751818054%3AKZ0oofNaOQuNt0%3A19%3AAYmU_tQ-lApuhXyezVqrtReM5nhl1H_7XBxzYt4iuw",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": 1827278079.180348,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "rur",
+      "value": "\"CCO\\05479751818054\\0541827278123:01ff6d0e9ac47ac5533966f907ab7d8524483bbb51b80795b53acf2c6292a80bbac96ec1\"",
+      "domain": ".threads.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.threads.com",
+      "localStorage": [
+        {
+          "name": "barcelona_messaging_tooltip_dismissed",
+          "value": "true"
+        },
+        {
+          "name": "hb_timestamp",
+          "value": "1795742036721"
+        },
+        {
+          "name": "barcelona_your_algo_feed_header_nux_count",
+          "value": "1"
+        },
+        {
+          "name": "_oz_bandwidthAndTTFBSamples",
+          "value": "{\"b\":[],\"t\":[]}"
+        },
+        {
+          "name": "barcelona_onboarding_waterfall_id",
+          "value": "{\"expiresAtMs\":1795749236176,\"id\":\"ce66ac8c-f4c4-4b89-a225-ea51eea3f9bd\"}"
+        },
+        {
+          "name": "signal_flush_timestamp",
+          "value": "1795742036758"
+        },
+        {
+          "name": "Session",
+          "value": "hi8eg0:1795742156602"
+        },
+        {
+          "name": "barcelona_your_algo_feed_header_nux_dismissed",
+          "value": "true"
+        },
+        {
+          "name": "_oz_bandwidthEstimate",
+          "value": "10000000"
+        },
+        {
+          "name": "banzai:last_storage_flush",
+          "value": "1795742037145.2"
+        }
+      ]
+    }
+  ]
+}

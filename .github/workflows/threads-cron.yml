@@ -49,6 +49,7 @@ jobs:
         env:
           PYTHONIOENCODING: "utf-8"
           PYTHONUNBUFFERED: "1"
+          ALLOW_AUTO_LOGIN: "0"
         run: python -u thread_autopost_tool.py
 
       - name: Lưu lại Cookie mới sau phiên chạy

@@ -36,10 +36,20 @@ def extract_cookies():
             args=["--disable-blink-features=AutomationControlled"],
         )
 
-        # Trích toàn bộ trạng thái đăng nhập ra file JSON
-        ctx.storage_state(path=cookie_file)
+        try:
+            # Mở threads.com để đảm bảo cookie/localStorage của domain .threads.com được đồng bộ đầy đủ
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.goto(
+                "https://www.threads.com",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            page.wait_for_timeout(4000)
 
-        ctx.close()
+            # Trích toàn bộ trạng thái đăng nhập ra file JSON
+            ctx.storage_state(path=cookie_file)
+        finally:
+            ctx.close()
 
         print(f"✅ THÀNH CÔNG! Đã xuất file Cookie siêu nhẹ tại: {cookie_file}")
 

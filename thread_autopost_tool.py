@@ -82,6 +82,7 @@ STATUS_YES_NO_LINK = "YES_NO_LINK"
 STATUS_ACCOUNT_DISABLED = "Account disabled"
 
 HEADLESS = os.environ.get("HEADLESS", "1") != "0"
+ALLOW_AUTO_LOGIN = os.environ.get("ALLOW_AUTO_LOGIN", "1") == "1"
 
 REPLY_MAX_ATTEMPTS = 3
 
@@ -107,6 +108,13 @@ DISABLED_MARKERS = [
     "your account has been disabled",
     "account has been suspended",
     "tài khoản của bạn đã bị đình chỉ",
+]
+
+RATE_LIMIT_MARKERS = [
+    "hãy thử lại sau",
+    "chúng tôi hạn chế một số hoạt động",
+    "try again later",
+    "we restrict certain activity",
 ]
 
 GUEST_EXACT_MARKERS = [
@@ -158,6 +166,10 @@ LOGIN_ERROR_MARKERS = [
 
 class AccountDisabledError(Exception):
     """Tài khoản Threads bị vô hiệu hóa/khóa, không thể dùng được nữa."""
+
+
+class RateLimitError(Exception):
+    """Meta đang hạn chế hoạt động / chặn login tạm thời trên IP hiện tại."""
 
 
 class AccountLoginError(Exception):
@@ -905,9 +917,9 @@ class ThreadsBot:
             args=["--disable-blink-features=AutomationControlled", "--lang=vi-VN"],
         )
 
+        # Không hardcode User-Agent cũ để khớp đúng với phiên bản Chrome đang chạy
         context_options = {
             "viewport": {"width": 1280, "height": 900},
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             "locale": "vi-VN",
             "timezone_id": "Asia/Ho_Chi_Minh",
         }
@@ -927,12 +939,19 @@ class ThreadsBot:
         is_logged_in = await self._is_logged_in()
 
         if not is_logged_in:
+            if not ALLOW_AUTO_LOGIN:
+                await self._dump_debug("cookie_expired")
+                raise AccountLoginError(
+                    "Cookie hết hạn hoặc không hợp lệ (đã tắt auto-login trên CI). "
+                    "Hãy lấy lại cookie bằng login.py + get_cookie.py rồi đẩy lên repo."
+                )
+
             print(
                 f"⚠ Cookie hỏng hoặc chưa có cho {self.account_code}. Tiến hành auto-login..."
             )
             try:
                 await self._login()
-            except (AccountDisabledError, AccountLoginError):
+            except (AccountDisabledError, RateLimitError, AccountLoginError):
                 await self._raise_if_disabled()
                 raise
             except Exception as e:
@@ -961,6 +980,26 @@ class ThreadsBot:
                 pass
             raise AccountDisabledError(
                 f"Tài khoản {self.account_code} bị Threads vô hiệu hóa/khóa"
+            )
+
+    async def _raise_if_rate_limited(self):
+        """Phát hiện popup 'Hãy thử lại sau - Chúng tôi hạn chế một số hoạt động để bảo vệ cộng đồng'."""
+        try:
+            body_text = (await self.page.inner_text("body")).lower()
+        except Exception:
+            return
+
+        if any(marker in body_text for marker in RATE_LIMIT_MARKERS):
+            try:
+                await self.page.screenshot(
+                    path=os.path.join(
+                        self.error_dir, f"error_ratelimit_{self.account_code}.png"
+                    )
+                )
+            except Exception:
+                pass
+            raise RateLimitError(
+                "Meta hiển thị 'Hãy thử lại sau' (hạn chế hoạt động). Dừng đăng nhập để tránh khóa tài khoản."
             )
 
     async def close(self):
@@ -1070,6 +1109,8 @@ class ThreadsBot:
     async def _login(self):
         await self._goto(f"{THREADS_URL}/login")
         await self._raise_if_disabled()
+        await self._raise_if_rate_limited()
+
         if await self._is_checkpoint_screen():
             await self.page.screenshot(
                 path=os.path.join(
@@ -1095,18 +1136,22 @@ class ThreadsBot:
             pass
 
         try:
-            await self.page.wait_for_selector(
-                'input[type="text"], input[name="username"]', timeout=10000
-            )
-            await self.page.fill(
-                'input[type="text"], input[name="username"]', self.email
-            )
+            user_input = self.page.locator(
+                'input[type="text"], input[name="username"]'
+            ).first
+            await user_input.wait_for(state="visible", timeout=10000)
+            await user_input.click(force=True)
+            await user_input.fill("")
+            await user_input.type(self.email, delay=random.randint(60, 120))
             await self.page.wait_for_timeout(500)
 
-            await self.page.fill(
-                'input[type="password"], input[name="password"]', self.password
-            )
-            await self.page.wait_for_timeout(500)
+            pass_input = self.page.locator(
+                'input[type="password"], input[name="password"]'
+            ).first
+            await pass_input.click(force=True)
+            await pass_input.fill("")
+            await pass_input.type(self.password, delay=random.randint(60, 120))
+            await self.page.wait_for_timeout(700)
 
             print("🔄 Đang nhấn phím Enter để Đăng nhập...")
             await self.page.keyboard.press("Enter")
@@ -1123,6 +1168,7 @@ class ThreadsBot:
         while time.monotonic() < deadline:
             await self.page.wait_for_timeout(1500)
             await self._raise_if_disabled()
+            await self._raise_if_rate_limited()
 
             if await self._has_authenticated_ui(wait_s=1):
                 break
@@ -1159,8 +1205,10 @@ class ThreadsBot:
             await self._goto(THREADS_URL)
         await self._dismiss_popups()
         await self._raise_if_disabled()
+        await self._raise_if_rate_limited()
 
         if not await self._has_authenticated_ui(wait_s=10):
+            await self._raise_if_rate_limited()
             if await self._is_checkpoint_screen():
                 await self.page.screenshot(
                     path=os.path.join(
@@ -1421,7 +1469,7 @@ class ThreadsBot:
                     print(f"✅ Đã đăng comment {n}/{total} thành công!")
                     last_error = None
                     break
-                except (AccountDisabledError, AccountLoginError):
+                except (AccountDisabledError, RateLimitError, AccountLoginError):
                     raise
                 except Exception as e:
                     last_error = e
@@ -1896,7 +1944,7 @@ async def run():
                     await bot.reply_to_post(
                         post_url=post_url, texts=reply_parts, main_text=main_text
                     )
-                except (AccountDisabledError, AccountLoginError):
+                except (AccountDisabledError, RateLimitError, AccountLoginError):
                     raise
                 except Exception as reply_err:
                     print(f"❌ Comment phụ thất bại: {reply_err}")
@@ -1923,6 +1971,17 @@ async def run():
                 mark_reply_error(row_index=row_index, post_url=post_url)
             elif status != STATUS_REPLY_ERROR:
                 mark_account_disabled_row(row_index, acc_code)
+
+        except RateLimitError as e:
+            print(f"⛔ {e}")
+            if post_url and not existing_post_url:
+                mark_reply_error(row_index=row_index, post_url=post_url)
+                summary["reply_error"] += 1
+            else:
+                mark_error(row_index, f"⛔ {str(e)[:180]}")
+                summary["error"] += 1
+            print("🛑 Dừng phiên chạy ngay để tránh spam login lên Meta.")
+            break
 
         except ProfileResolutionError as e:
             print(f"👤 LỖI DÒ PROFILE CHO {acc_code}: {e}")

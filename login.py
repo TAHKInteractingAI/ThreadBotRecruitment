@@ -36,8 +36,8 @@ def manual_login():
 
     print(f"\n✅ Đang mở Google Chrome thật cho tài khoản {account_code}...")
 
-    # Mở Chrome hoàn toàn độc lập, tách biệt khỏi Playwright
-    cmd = f'"{chrome_path}" --user-data-dir="{profile_dir}" "https://www.threads.net/login"'
+    # Mở Chrome hoàn toàn độc lập, tách biệt khỏi Playwright (trỏ thẳng tới threads.com)
+    cmd = f'"{chrome_path}" --user-data-dir="{profile_dir}" "https://www.threads.com/login"'
     subprocess.Popen(cmd, shell=True)
 
     print("👉 Hãy tự đăng nhập (bằng Instagram hoặc Username đều được).")
